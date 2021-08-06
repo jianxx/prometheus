@@ -1851,6 +1851,7 @@ go_repository(
 
 go_repository(
     name = "com_github_influxdata_influxdb",
+    build_file_proto_mode = "disable",
     importpath = "github.com/influxdata/influxdb",
     sum = "h1:60F7eqotCxogyuZAjNglNRG9D6WY65KR9mcmugBx6cs=",
     version = "v1.9.3",
@@ -3818,6 +3819,7 @@ go_repository(
 
 go_repository(
     name = "org_golang_google_protobuf",
+    build_file_proto_mode = "disable",
     importpath = "google.golang.org/protobuf",
     sum = "h1:SnqbnDw1V7RiZcXPx5MEeqPv2s79L9i7BJUlG/+RurQ=",
     version = "v1.27.1",

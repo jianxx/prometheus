@@ -1,19 +1,72 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+
+proto_library(
+    name = "prompb_types_proto",
+    srcs = [
+        "types.proto",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@gogo_special_proto//github.com/gogo/protobuf/gogoproto",
+    ],
+)
+
+proto_library(
+    name = "prompb_proto",
+    srcs = [
+        "remote.proto",
+    ],
+    import_prefix = "prompb",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":prompb_types_proto",
+        "@gogo_special_proto//github.com/gogo/protobuf/gogoproto",
+    ],
+)
+
+go_proto_library(
+    name = "prompb_types_go_proto",
+    compilers = ["@io_bazel_rules_go//proto:gogofast_proto"],
+    importpath = "prompb",
+    proto = ":prompb_types_proto",
+    visibility = ["//visibility:public"],
+)
+
+go_proto_library(
+    name = "prompb_go_proto",
+    compilers = ["@io_bazel_rules_go//proto:gogofast_proto"],
+    embed = ["prompb_types_go_proto"],
+    importpath = "prompb",
+    proto = ":prompb_proto",
+    visibility = ["//visibility:public"],
+)
 
 go_library(
     name = "prompb",
-    srcs = [
-        "custom.go",
-        "remote.pb.go",
-        "types.pb.go",
+    srcs = ["custom.go"],
+    embed = [
+        ":prompb_go_proto",
     ],
     importpath = "github.com/prometheus/prometheus/prompb",
     visibility = ["//visibility:public"],
-    deps = [
-        "@com_github_gogo_protobuf//gogoproto",
-        "@com_github_gogo_protobuf//proto",
-    ],
 )
+
+# go_library(
+#     name = "prompb",
+#     srcs = [
+#         "custom.go",
+#         "remote.pb.go",
+#         "types.pb.go",
+#     ],
+#     importpath = "github.com/prometheus/prometheus/prompb",
+#     visibility = ["//visibility:public"],
+#     deps = [
+#         "@com_github_gogo_protobuf//gogoproto",
+#         "@com_github_gogo_protobuf//proto",
+#     ],
+# )
 
 alias(
     name = "go_default_library",
