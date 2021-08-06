@@ -571,6 +571,7 @@ go_repository(
 
 go_repository(
     name = "com_github_containerd_containerd",
+    build_file_proto_mode = "disable",
     importpath = "github.com/containerd/containerd",
     sum = "h1:uPF0og3ByFzDnaStfiQj3fVGTEtaSNyU+bW7GR/nqGA=",
     version = "v1.5.4",
@@ -2862,13 +2863,6 @@ go_repository(
     importpath = "github.com/prometheus/procfs",
     sum = "h1:mxy4L2jP6qMonqmq+aTtOx1ifVWUgG/TAmntgbh3xv4=",
     version = "v0.6.0",
-)
-
-go_repository(
-    name = "com_github_prometheus_tsdb",
-    importpath = "github.com/prometheus/tsdb",
-    sum = "h1:YZcsG11NqnK4czYLrWd9mpEuAJIHVQLwdrleYfszMAA=",
-    version = "v0.7.1",
 )
 
 go_repository(
