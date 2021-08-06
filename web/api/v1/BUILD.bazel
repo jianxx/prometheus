@@ -1,0 +1,68 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "api",
+    srcs = ["api.go"],
+    importpath = "github.com/prometheus/prometheus/web/api/v1",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//config",
+        "//pkg/exemplar",
+        "//pkg/labels",
+        "//pkg/textparse",
+        "//pkg/timestamp",
+        "//promql",
+        "//promql/parser",
+        "//rules",
+        "//scrape",
+        "//storage",
+        "//storage/remote",
+        "//tsdb",
+        "//tsdb/index",
+        "//util/httputil",
+        "//util/stats",
+        "@com_github_go_kit_log//:log",
+        "@com_github_go_kit_log//level",
+        "@com_github_json_iterator_go//:go",
+        "@com_github_pkg_errors//:errors",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_common//model",
+        "@com_github_prometheus_common//route",
+    ],
+)
+
+go_test(
+    name = "api_test",
+    srcs = ["api_test.go"],
+    embed = [":api"],
+    deps = [
+        "//config",
+        "//pkg/exemplar",
+        "//pkg/labels",
+        "//pkg/textparse",
+        "//pkg/timestamp",
+        "//prompb",
+        "//promql",
+        "//promql/parser",
+        "//rules",
+        "//scrape",
+        "//storage",
+        "//storage/remote",
+        "//tsdb",
+        "//util/teststorage",
+        "@com_github_go_kit_log//:log",
+        "@com_github_pkg_errors//:errors",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_common//config",
+        "@com_github_prometheus_common//model",
+        "@com_github_prometheus_common//promlog",
+        "@com_github_prometheus_common//route",
+        "@com_github_stretchr_testify//require",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":api",
+    visibility = ["//visibility:public"],
+)

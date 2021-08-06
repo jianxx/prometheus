@@ -1,0 +1,30 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "relabel",
+    srcs = ["relabel.go"],
+    importpath = "github.com/prometheus/prometheus/pkg/relabel",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/labels",
+        "@com_github_pkg_errors//:errors",
+        "@com_github_prometheus_common//model",
+    ],
+)
+
+go_test(
+    name = "relabel_test",
+    srcs = ["relabel_test.go"],
+    embed = [":relabel"],
+    deps = [
+        "//pkg/labels",
+        "@com_github_prometheus_common//model",
+        "@com_github_stretchr_testify//require",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":relabel",
+    visibility = ["//visibility:public"],
+)

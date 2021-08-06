@@ -1,0 +1,32 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "template",
+    srcs = ["template.go"],
+    importpath = "github.com/prometheus/prometheus/template",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//promql",
+        "//util/strutil",
+        "@com_github_pkg_errors//:errors",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_common//model",
+    ],
+)
+
+go_test(
+    name = "template_test",
+    srcs = ["template_test.go"],
+    embed = [":template"],
+    deps = [
+        "//pkg/labels",
+        "//promql",
+        "@com_github_stretchr_testify//require",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":template",
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,28 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "tsdbutil",
+    srcs = [
+        "buffer.go",
+        "chunks.go",
+    ],
+    importpath = "github.com/prometheus/prometheus/tsdb/tsdbutil",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tsdb/chunkenc",
+        "//tsdb/chunks",
+    ],
+)
+
+go_test(
+    name = "tsdbutil_test",
+    srcs = ["buffer_test.go"],
+    embed = [":tsdbutil"],
+    deps = ["@com_github_stretchr_testify//require"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":tsdbutil",
+    visibility = ["//visibility:public"],
+)
