@@ -16,6 +16,7 @@ package config
 import (
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -23,10 +24,10 @@ import (
 	"time"
 
 	"github.com/alecthomas/units"
-	"github.com/go-kit/log"
 	"github.com/grafana/regexp"
 	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/common/promslog"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 
@@ -61,6 +62,11 @@ import (
 	"github.com/prometheus/prometheus/util/testutil"
 )
 
+func init() {
+	// This can be removed when the default validation scheme in common is updated.
+	model.NameValidationScheme = model.UTF8Validation
+}
+
 func mustParseURL(u string) *config.URL {
 	parsed, err := url.Parse(u)
 	if err != nil {
@@ -77,14 +83,16 @@ const (
 	globLabelNameLengthLimit  = 200
 	globLabelValueLengthLimit = 200
 	globalGoGC                = 42
+	globScrapeFailureLogFile  = "testdata/fail.log"
 )
 
 var expectedConf = &Config{
 	GlobalConfig: GlobalConfig{
-		ScrapeInterval:     model.Duration(15 * time.Second),
-		ScrapeTimeout:      DefaultGlobalConfig.ScrapeTimeout,
-		EvaluationInterval: model.Duration(30 * time.Second),
-		QueryLogFile:       "",
+		ScrapeInterval:       model.Duration(15 * time.Second),
+		ScrapeTimeout:        DefaultGlobalConfig.ScrapeTimeout,
+		EvaluationInterval:   model.Duration(30 * time.Second),
+		QueryLogFile:         "testdata/query.log",
+		ScrapeFailureLogFile: globScrapeFailureLogFile,
 
 		ExternalLabels: labels.FromStrings("foo", "bar", "monitor", "codelab"),
 
@@ -164,10 +172,11 @@ var expectedConf = &Config{
 
 	RemoteReadConfigs: []*RemoteReadConfig{
 		{
-			URL:           mustParseURL("http://remote1/read"),
-			RemoteTimeout: model.Duration(1 * time.Minute),
-			ReadRecent:    true,
-			Name:          "default",
+			URL:              mustParseURL("http://remote1/read"),
+			RemoteTimeout:    model.Duration(1 * time.Minute),
+			ChunkedReadLimit: DefaultChunkedReadLimit,
+			ReadRecent:       true,
+			Name:             "default",
 			HTTPClientConfig: config.HTTPClientConfig{
 				FollowRedirects: true,
 				EnableHTTP2:     false,
@@ -177,6 +186,7 @@ var expectedConf = &Config{
 		{
 			URL:              mustParseURL("http://remote3/read"),
 			RemoteTimeout:    model.Duration(1 * time.Minute),
+			ChunkedReadLimit: DefaultChunkedReadLimit,
 			ReadRecent:       false,
 			Name:             "read_special",
 			RequiredMatchers: model.LabelSet{"job": "special"},
@@ -208,6 +218,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  "testdata/fail_prom.log",
 
 			MetricsPath: DefaultScrapeConfig.MetricsPath,
 			Scheme:      DefaultScrapeConfig.Scheme,
@@ -221,6 +232,15 @@ var expectedConf = &Config{
 				EnableHTTP2:     true,
 				TLSConfig: config.TLSConfig{
 					MinVersion: config.TLSVersion(tls.VersionTLS10),
+				},
+				HTTPHeaders: &config.Headers{
+					Headers: map[string]config.Header{
+						"foo": {
+							Values:  []string{"foobar"},
+							Secrets: []config.Secret{"bar", "foo"},
+							Files:   []string{filepath.FromSlash("testdata/valid_password_file")},
+						},
+					},
 				},
 			},
 
@@ -311,6 +331,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  210,
 			LabelValueLengthLimit: 210,
 			ScrapeProtocols:       []ScrapeProtocol{PrometheusText0_0_4},
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			HTTPClientConfig: config.HTTPClientConfig{
 				BasicAuth: &config.BasicAuth{
@@ -408,6 +429,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -463,6 +485,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath: "/metrics",
 			Scheme:      "http",
@@ -496,6 +519,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -535,6 +559,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath: DefaultScrapeConfig.MetricsPath,
 			Scheme:      DefaultScrapeConfig.Scheme,
@@ -574,6 +599,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -603,6 +629,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -640,6 +667,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -674,6 +702,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -715,6 +744,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -746,6 +776,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -780,6 +811,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -807,6 +839,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -837,6 +870,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      "/federate",
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -867,6 +901,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -897,6 +932,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -924,6 +960,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -959,6 +996,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -993,6 +1031,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1024,6 +1063,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1054,6 +1094,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1088,6 +1129,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1125,6 +1167,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1181,6 +1224,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1208,6 +1252,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			HTTPClientConfig: config.DefaultHTTPClientConfig,
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
@@ -1246,6 +1291,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			HTTPClientConfig: config.DefaultHTTPClientConfig,
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
@@ -1290,6 +1336,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1325,6 +1372,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			HTTPClientConfig: config.DefaultHTTPClientConfig,
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
@@ -1354,6 +1402,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1386,6 +1435,7 @@ var expectedConf = &Config{
 			LabelNameLengthLimit:  globLabelNameLengthLimit,
 			LabelValueLengthLimit: globLabelValueLengthLimit,
 			ScrapeProtocols:       DefaultGlobalConfig.ScrapeProtocols,
+			ScrapeFailureLogFile:  globScrapeFailureLogFile,
 
 			MetricsPath:      DefaultScrapeConfig.MetricsPath,
 			Scheme:           DefaultScrapeConfig.Scheme,
@@ -1451,7 +1501,7 @@ var expectedConf = &Config{
 }
 
 func TestYAMLRoundtrip(t *testing.T) {
-	want, err := LoadFile("testdata/roundtrip.good.yml", false, false, log.NewNopLogger())
+	want, err := LoadFile("testdata/roundtrip.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 
 	out, err := yaml.Marshal(want)
@@ -1464,7 +1514,7 @@ func TestYAMLRoundtrip(t *testing.T) {
 }
 
 func TestRemoteWriteRetryOnRateLimit(t *testing.T) {
-	want, err := LoadFile("testdata/remote_write_retry_on_rate_limit.good.yml", false, false, log.NewNopLogger())
+	want, err := LoadFile("testdata/remote_write_retry_on_rate_limit.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 
 	out, err := yaml.Marshal(want)
@@ -1479,7 +1529,7 @@ func TestRemoteWriteRetryOnRateLimit(t *testing.T) {
 
 func TestOTLPSanitizeResourceAttributes(t *testing.T) {
 	t.Run("good config", func(t *testing.T) {
-		want, err := LoadFile(filepath.Join("testdata", "otlp_sanitize_resource_attributes.good.yml"), false, false, log.NewNopLogger())
+		want, err := LoadFile(filepath.Join("testdata", "otlp_sanitize_resource_attributes.good.yml"), false, false, promslog.NewNopLogger())
 		require.NoError(t, err)
 
 		out, err := yaml.Marshal(want)
@@ -1491,7 +1541,7 @@ func TestOTLPSanitizeResourceAttributes(t *testing.T) {
 	})
 
 	t.Run("bad config", func(t *testing.T) {
-		_, err := LoadFile(filepath.Join("testdata", "otlp_sanitize_resource_attributes.bad.yml"), false, false, log.NewNopLogger())
+		_, err := LoadFile(filepath.Join("testdata", "otlp_sanitize_resource_attributes.bad.yml"), false, false, promslog.NewNopLogger())
 		require.ErrorContains(t, err, `duplicated promoted OTel resource attribute "k8s.job.name"`)
 		require.ErrorContains(t, err, `empty promoted OTel resource attribute`)
 	})
@@ -1500,16 +1550,16 @@ func TestOTLPSanitizeResourceAttributes(t *testing.T) {
 func TestLoadConfig(t *testing.T) {
 	// Parse a valid file that sets a global scrape timeout. This tests whether parsing
 	// an overwritten default field in the global config permanently changes the default.
-	_, err := LoadFile("testdata/global_timeout.good.yml", false, false, log.NewNopLogger())
+	_, err := LoadFile("testdata/global_timeout.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 
-	c, err := LoadFile("testdata/conf.good.yml", false, false, log.NewNopLogger())
+	c, err := LoadFile("testdata/conf.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	require.Equal(t, expectedConf, c)
 }
 
 func TestScrapeIntervalLarger(t *testing.T) {
-	c, err := LoadFile("testdata/scrape_interval_larger.good.yml", false, false, log.NewNopLogger())
+	c, err := LoadFile("testdata/scrape_interval_larger.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	require.Len(t, c.ScrapeConfigs, 1)
 	for _, sc := range c.ScrapeConfigs {
@@ -1519,7 +1569,7 @@ func TestScrapeIntervalLarger(t *testing.T) {
 
 // YAML marshaling must not reveal authentication credentials.
 func TestElideSecrets(t *testing.T) {
-	c, err := LoadFile("testdata/conf.good.yml", false, false, log.NewNopLogger())
+	c, err := LoadFile("testdata/conf.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 
 	secretRe := regexp.MustCompile(`\\u003csecret\\u003e|<secret>`)
@@ -1529,38 +1579,38 @@ func TestElideSecrets(t *testing.T) {
 	yamlConfig := string(config)
 
 	matches := secretRe.FindAllStringIndex(yamlConfig, -1)
-	require.Len(t, matches, 22, "wrong number of secret matches found")
+	require.Len(t, matches, 24, "wrong number of secret matches found")
 	require.NotContains(t, yamlConfig, "mysecret",
 		"yaml marshal reveals authentication credentials.")
 }
 
 func TestLoadConfigRuleFilesAbsolutePath(t *testing.T) {
 	// Parse a valid file that sets a rule files with an absolute path
-	c, err := LoadFile(ruleFilesConfigFile, false, false, log.NewNopLogger())
+	c, err := LoadFile(ruleFilesConfigFile, false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	require.Equal(t, ruleFilesExpectedConf, c)
 }
 
 func TestKubernetesEmptyAPIServer(t *testing.T) {
-	_, err := LoadFile("testdata/kubernetes_empty_apiserver.good.yml", false, false, log.NewNopLogger())
+	_, err := LoadFile("testdata/kubernetes_empty_apiserver.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 }
 
 func TestKubernetesWithKubeConfig(t *testing.T) {
-	_, err := LoadFile("testdata/kubernetes_kubeconfig_without_apiserver.good.yml", false, false, log.NewNopLogger())
+	_, err := LoadFile("testdata/kubernetes_kubeconfig_without_apiserver.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 }
 
 func TestKubernetesSelectors(t *testing.T) {
-	_, err := LoadFile("testdata/kubernetes_selectors_endpoints.good.yml", false, false, log.NewNopLogger())
+	_, err := LoadFile("testdata/kubernetes_selectors_endpoints.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
-	_, err = LoadFile("testdata/kubernetes_selectors_node.good.yml", false, false, log.NewNopLogger())
+	_, err = LoadFile("testdata/kubernetes_selectors_node.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
-	_, err = LoadFile("testdata/kubernetes_selectors_ingress.good.yml", false, false, log.NewNopLogger())
+	_, err = LoadFile("testdata/kubernetes_selectors_ingress.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
-	_, err = LoadFile("testdata/kubernetes_selectors_pod.good.yml", false, false, log.NewNopLogger())
+	_, err = LoadFile("testdata/kubernetes_selectors_pod.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
-	_, err = LoadFile("testdata/kubernetes_selectors_service.good.yml", false, false, log.NewNopLogger())
+	_, err = LoadFile("testdata/kubernetes_selectors_service.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 }
 
@@ -2039,15 +2089,22 @@ var expectedErrors = []struct {
 }
 
 func TestBadConfigs(t *testing.T) {
+	model.NameValidationScheme = model.LegacyValidation
+	defer func() {
+		model.NameValidationScheme = model.UTF8Validation
+	}()
 	for _, ee := range expectedErrors {
-		_, err := LoadFile("testdata/"+ee.filename, false, false, log.NewNopLogger())
-		require.Error(t, err, "%s", ee.filename)
-		require.Contains(t, err.Error(), ee.errMsg,
+		_, err := LoadFile("testdata/"+ee.filename, false, false, promslog.NewNopLogger())
+		require.ErrorContains(t, err, ee.errMsg,
 			"Expected error for %s to contain %q but got: %s", ee.filename, ee.errMsg, err)
 	}
 }
 
 func TestBadStaticConfigsJSON(t *testing.T) {
+	model.NameValidationScheme = model.LegacyValidation
+	defer func() {
+		model.NameValidationScheme = model.UTF8Validation
+	}()
 	content, err := os.ReadFile("testdata/static_config.bad.json")
 	require.NoError(t, err)
 	var tg targetgroup.Group
@@ -2056,6 +2113,10 @@ func TestBadStaticConfigsJSON(t *testing.T) {
 }
 
 func TestBadStaticConfigsYML(t *testing.T) {
+	model.NameValidationScheme = model.LegacyValidation
+	defer func() {
+		model.NameValidationScheme = model.UTF8Validation
+	}()
 	content, err := os.ReadFile("testdata/static_config.bad.yml")
 	require.NoError(t, err)
 	var tg targetgroup.Group
@@ -2064,7 +2125,7 @@ func TestBadStaticConfigsYML(t *testing.T) {
 }
 
 func TestEmptyConfig(t *testing.T) {
-	c, err := Load("", false, log.NewNopLogger())
+	c, err := Load("", false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	exp := DefaultConfig
 	require.Equal(t, exp, *c)
@@ -2074,38 +2135,38 @@ func TestExpandExternalLabels(t *testing.T) {
 	// Cleanup ant TEST env variable that could exist on the system.
 	os.Setenv("TEST", "")
 
-	c, err := LoadFile("testdata/external_labels.good.yml", false, false, log.NewNopLogger())
+	c, err := LoadFile("testdata/external_labels.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	testutil.RequireEqual(t, labels.FromStrings("bar", "foo", "baz", "foo${TEST}bar", "foo", "${TEST}", "qux", "foo$${TEST}", "xyz", "foo$$bar"), c.GlobalConfig.ExternalLabels)
 
-	c, err = LoadFile("testdata/external_labels.good.yml", false, true, log.NewNopLogger())
+	c, err = LoadFile("testdata/external_labels.good.yml", false, true, promslog.NewNopLogger())
 	require.NoError(t, err)
 	testutil.RequireEqual(t, labels.FromStrings("bar", "foo", "baz", "foobar", "foo", "", "qux", "foo${TEST}", "xyz", "foo$bar"), c.GlobalConfig.ExternalLabels)
 
 	os.Setenv("TEST", "TestValue")
-	c, err = LoadFile("testdata/external_labels.good.yml", false, true, log.NewNopLogger())
+	c, err = LoadFile("testdata/external_labels.good.yml", false, true, promslog.NewNopLogger())
 	require.NoError(t, err)
 	testutil.RequireEqual(t, labels.FromStrings("bar", "foo", "baz", "fooTestValuebar", "foo", "TestValue", "qux", "foo${TEST}", "xyz", "foo$bar"), c.GlobalConfig.ExternalLabels)
 }
 
 func TestAgentMode(t *testing.T) {
-	_, err := LoadFile("testdata/agent_mode.with_alert_manager.yml", true, false, log.NewNopLogger())
+	_, err := LoadFile("testdata/agent_mode.with_alert_manager.yml", true, false, promslog.NewNopLogger())
 	require.ErrorContains(t, err, "field alerting is not allowed in agent mode")
 
-	_, err = LoadFile("testdata/agent_mode.with_alert_relabels.yml", true, false, log.NewNopLogger())
+	_, err = LoadFile("testdata/agent_mode.with_alert_relabels.yml", true, false, promslog.NewNopLogger())
 	require.ErrorContains(t, err, "field alerting is not allowed in agent mode")
 
-	_, err = LoadFile("testdata/agent_mode.with_rule_files.yml", true, false, log.NewNopLogger())
+	_, err = LoadFile("testdata/agent_mode.with_rule_files.yml", true, false, promslog.NewNopLogger())
 	require.ErrorContains(t, err, "field rule_files is not allowed in agent mode")
 
-	_, err = LoadFile("testdata/agent_mode.with_remote_reads.yml", true, false, log.NewNopLogger())
+	_, err = LoadFile("testdata/agent_mode.with_remote_reads.yml", true, false, promslog.NewNopLogger())
 	require.ErrorContains(t, err, "field remote_read is not allowed in agent mode")
 
-	c, err := LoadFile("testdata/agent_mode.without_remote_writes.yml", true, false, log.NewNopLogger())
+	c, err := LoadFile("testdata/agent_mode.without_remote_writes.yml", true, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	require.Empty(t, c.RemoteWriteConfigs)
 
-	c, err = LoadFile("testdata/agent_mode.good.yml", true, false, log.NewNopLogger())
+	c, err = LoadFile("testdata/agent_mode.good.yml", true, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	require.Len(t, c.RemoteWriteConfigs, 1)
 	require.Equal(
@@ -2116,7 +2177,7 @@ func TestAgentMode(t *testing.T) {
 }
 
 func TestEmptyGlobalBlock(t *testing.T) {
-	c, err := Load("global:\n", false, log.NewNopLogger())
+	c, err := Load("global:\n", false, promslog.NewNopLogger())
 	require.NoError(t, err)
 	exp := DefaultConfig
 	exp.Runtime = DefaultRuntimeConfig
@@ -2271,7 +2332,7 @@ func TestGetScrapeConfigs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			c, err := LoadFile(tc.configFile, false, false, log.NewNopLogger())
+			c, err := LoadFile(tc.configFile, false, false, promslog.NewNopLogger())
 			require.NoError(t, err)
 
 			scfgs, err := c.GetScrapeConfigs()
@@ -2289,7 +2350,7 @@ func kubernetesSDHostURL() config.URL {
 }
 
 func TestScrapeConfigDisableCompression(t *testing.T) {
-	want, err := LoadFile("testdata/scrape_config_disable_compression.good.yml", false, false, log.NewNopLogger())
+	want, err := LoadFile("testdata/scrape_config_disable_compression.good.yml", false, false, promslog.NewNopLogger())
 	require.NoError(t, err)
 
 	out, err := yaml.Marshal(want)
@@ -2299,4 +2360,53 @@ func TestScrapeConfigDisableCompression(t *testing.T) {
 	require.NoError(t, yaml.UnmarshalStrict(out, got))
 
 	require.False(t, got.ScrapeConfigs[0].EnableCompression)
+}
+
+func TestScrapeConfigNameValidationSettings(t *testing.T) {
+	model.NameValidationScheme = model.UTF8Validation
+	defer func() {
+		model.NameValidationScheme = model.LegacyValidation
+	}()
+
+	tests := []struct {
+		name         string
+		inputFile    string
+		expectScheme string
+	}{
+		{
+			name:         "blank config implies default",
+			inputFile:    "scrape_config_default_validation_mode",
+			expectScheme: "",
+		},
+		{
+			name:         "global setting implies local settings",
+			inputFile:    "scrape_config_global_validation_mode",
+			expectScheme: "legacy",
+		},
+		{
+			name:         "local setting",
+			inputFile:    "scrape_config_local_validation_mode",
+			expectScheme: "legacy",
+		},
+		{
+			name:         "local setting overrides global setting",
+			inputFile:    "scrape_config_local_global_validation_mode",
+			expectScheme: "utf8",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := LoadFile(fmt.Sprintf("testdata/%s.yml", tc.inputFile), false, false, promslog.NewNopLogger())
+			require.NoError(t, err)
+
+			out, err := yaml.Marshal(want)
+
+			require.NoError(t, err)
+			got := &Config{}
+			require.NoError(t, yaml.UnmarshalStrict(out, got))
+
+			require.Equal(t, tc.expectScheme, got.ScrapeConfigs[0].MetricNameValidationScheme)
+		})
+	}
 }

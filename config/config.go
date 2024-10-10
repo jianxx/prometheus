@@ -16,6 +16,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,8 +26,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/units"
-	"github.com/go-kit/log"
-	"github.com/go-kit/log/level"
 	"github.com/grafana/regexp"
 	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
@@ -67,8 +66,13 @@ var (
 	}
 )
 
+const (
+	LegacyValidationConfig = "legacy"
+	UTF8ValidationConfig   = "utf8"
+)
+
 // Load parses the YAML input s into a Config.
-func Load(s string, expandExternalLabels bool, logger log.Logger) (*Config, error) {
+func Load(s string, expandExternalLabels bool, logger *slog.Logger) (*Config, error) {
 	cfg := &Config{}
 	// If the entire config body is empty the UnmarshalYAML method is
 	// never called. We thus have to set the DefaultConfig at the entry
@@ -93,11 +97,11 @@ func Load(s string, expandExternalLabels bool, logger log.Logger) (*Config, erro
 			if v := os.Getenv(s); v != "" {
 				return v
 			}
-			level.Warn(logger).Log("msg", "Empty environment variable", "name", s)
+			logger.Warn("Empty environment variable", "name", s)
 			return ""
 		})
 		if newV != v.Value {
-			level.Debug(logger).Log("msg", "External label replaced", "label", v.Name, "input", v.Value, "output", newV)
+			logger.Debug("External label replaced", "label", v.Name, "input", v.Value, "output", newV)
 		}
 		// Note newV can be blank. https://github.com/prometheus/prometheus/issues/11024
 		b.Add(v.Name, newV)
@@ -107,7 +111,7 @@ func Load(s string, expandExternalLabels bool, logger log.Logger) (*Config, erro
 }
 
 // LoadFile parses the given YAML file into a Config.
-func LoadFile(filename string, agentMode, expandExternalLabels bool, logger log.Logger) (*Config, error) {
+func LoadFile(filename string, agentMode, expandExternalLabels bool, logger *slog.Logger) (*Config, error) {
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -216,6 +220,7 @@ var (
 	// DefaultRemoteReadConfig is the default remote read configuration.
 	DefaultRemoteReadConfig = RemoteReadConfig{
 		RemoteTimeout:        model.Duration(1 * time.Minute),
+		ChunkedReadLimit:     DefaultChunkedReadLimit,
 		HTTPClientConfig:     config.DefaultHTTPClientConfig,
 		FilterExternalLabels: true,
 	}
@@ -423,6 +428,8 @@ type GlobalConfig struct {
 	RuleQueryOffset model.Duration `yaml:"rule_query_offset,omitempty"`
 	// File to which PromQL queries are logged.
 	QueryLogFile string `yaml:"query_log_file,omitempty"`
+	// File to which scrape failures are logged.
+	ScrapeFailureLogFile string `yaml:"scrape_failure_log_file,omitempty"`
 	// The labels to add to any timeseries that this Prometheus instance scrapes.
 	ExternalLabels labels.Labels `yaml:"external_labels,omitempty"`
 	// An uncompressed response body larger than this many bytes will cause the
@@ -446,6 +453,8 @@ type GlobalConfig struct {
 	// Keep no more than this many dropped targets per job.
 	// 0 means no limit.
 	KeepDroppedTargets uint `yaml:"keep_dropped_targets,omitempty"`
+	// Allow UTF8 Metric and Label Names.
+	MetricNameValidationScheme string `yaml:"metric_name_validation_scheme,omitempty"`
 }
 
 // ScrapeProtocol represents supported protocol for scraping metrics.
@@ -471,6 +480,7 @@ var (
 	PrometheusText0_0_4  ScrapeProtocol = "PrometheusText0.0.4"
 	OpenMetricsText0_0_1 ScrapeProtocol = "OpenMetricsText0.0.1"
 	OpenMetricsText1_0_0 ScrapeProtocol = "OpenMetricsText1.0.0"
+	UTF8NamesHeader      string         = model.EscapingKey + "=" + model.AllowUTF8
 
 	ScrapeProtocolsHeaders = map[ScrapeProtocol]string{
 		PrometheusProto:      "application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited",
@@ -520,6 +530,7 @@ func validateAcceptScrapeProtocols(sps []ScrapeProtocol) error {
 // SetDirectory joins any relative file paths with dir.
 func (c *GlobalConfig) SetDirectory(dir string) {
 	c.QueryLogFile = config.JoinDir(dir, c.QueryLogFile)
+	c.ScrapeFailureLogFile = config.JoinDir(dir, c.ScrapeFailureLogFile)
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface.
@@ -582,6 +593,7 @@ func (c *GlobalConfig) isZero() bool {
 		c.EvaluationInterval == 0 &&
 		c.RuleQueryOffset == 0 &&
 		c.QueryLogFile == "" &&
+		c.ScrapeFailureLogFile == "" &&
 		c.ScrapeProtocols == nil
 }
 
@@ -623,6 +635,8 @@ type ScrapeConfig struct {
 	ScrapeProtocols []ScrapeProtocol `yaml:"scrape_protocols,omitempty"`
 	// Whether to scrape a classic histogram that is also exposed as a native histogram.
 	ScrapeClassicHistograms bool `yaml:"scrape_classic_histograms,omitempty"`
+	// File to which scrape failures are logged.
+	ScrapeFailureLogFile string `yaml:"scrape_failure_log_file,omitempty"`
 	// The HTTP resource path on which to fetch metrics from targets.
 	MetricsPath string `yaml:"metrics_path,omitempty"`
 	// The URL scheme with which to fetch metrics from targets.
@@ -656,6 +670,8 @@ type ScrapeConfig struct {
 	// Keep no more than this many dropped targets per job.
 	// 0 means no limit.
 	KeepDroppedTargets uint `yaml:"keep_dropped_targets,omitempty"`
+	// Allow UTF8 Metric and Label Names.
+	MetricNameValidationScheme string `yaml:"metric_name_validation_scheme,omitempty"`
 
 	// We cannot do proper Go type embedding below as the parser will then parse
 	// values arbitrarily into the overflow maps of further-down types.
@@ -673,6 +689,7 @@ type ScrapeConfig struct {
 func (c *ScrapeConfig) SetDirectory(dir string) {
 	c.ServiceDiscoveryConfigs.SetDirectory(dir)
 	c.HTTPClientConfig.SetDirectory(dir)
+	c.ScrapeFailureLogFile = config.JoinDir(dir, c.ScrapeFailureLogFile)
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface.
@@ -754,12 +771,28 @@ func (c *ScrapeConfig) Validate(globalConfig GlobalConfig) error {
 	if c.KeepDroppedTargets == 0 {
 		c.KeepDroppedTargets = globalConfig.KeepDroppedTargets
 	}
+	if c.ScrapeFailureLogFile == "" {
+		c.ScrapeFailureLogFile = globalConfig.ScrapeFailureLogFile
+	}
 
 	if c.ScrapeProtocols == nil {
 		c.ScrapeProtocols = globalConfig.ScrapeProtocols
 	}
 	if err := validateAcceptScrapeProtocols(c.ScrapeProtocols); err != nil {
 		return fmt.Errorf("%w for scrape config with job name %q", err, c.JobName)
+	}
+
+	switch globalConfig.MetricNameValidationScheme {
+	case LegacyValidationConfig:
+	case "", UTF8ValidationConfig:
+		if model.NameValidationScheme != model.UTF8Validation {
+			panic("utf8 name validation requested but model.NameValidationScheme is not set to UTF8")
+		}
+	default:
+		return fmt.Errorf("unknown name validation method specified, must be either 'legacy' or 'utf8', got %s", globalConfig.MetricNameValidationScheme)
+	}
+	if c.MetricNameValidationScheme == "" {
+		c.MetricNameValidationScheme = globalConfig.MetricNameValidationScheme
 	}
 
 	return nil
@@ -1256,13 +1289,20 @@ type MetadataConfig struct {
 	MaxSamplesPerSend int `yaml:"max_samples_per_send,omitempty"`
 }
 
+const (
+	// DefaultChunkedReadLimit is the default value for the maximum size of the protobuf frame client allows.
+	// 50MB is the default. This is equivalent to ~100k full XOR chunks and average labelset.
+	DefaultChunkedReadLimit = 5e+7
+)
+
 // RemoteReadConfig is the configuration for reading from remote storage.
 type RemoteReadConfig struct {
-	URL           *config.URL       `yaml:"url"`
-	RemoteTimeout model.Duration    `yaml:"remote_timeout,omitempty"`
-	Headers       map[string]string `yaml:"headers,omitempty"`
-	ReadRecent    bool              `yaml:"read_recent,omitempty"`
-	Name          string            `yaml:"name,omitempty"`
+	URL              *config.URL       `yaml:"url"`
+	RemoteTimeout    model.Duration    `yaml:"remote_timeout,omitempty"`
+	ChunkedReadLimit uint64            `yaml:"chunked_read_limit,omitempty"`
+	Headers          map[string]string `yaml:"headers,omitempty"`
+	ReadRecent       bool              `yaml:"read_recent,omitempty"`
+	Name             string            `yaml:"name,omitempty"`
 
 	// We cannot do proper Go type embedding below as the parser will then parse
 	// values arbitrarily into the overflow maps of further-down types.
